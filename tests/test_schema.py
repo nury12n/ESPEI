@@ -109,6 +109,19 @@ mcmc:
   input_db: dft.tdb
 """
 
+MCMC_RUN_DICT_ADDITIONAL_ARGS = {
+    'mcmc':
+        {
+            'iterations': 1000,
+            'input_db': 'input.tdb',
+            'additional_args': {'normalize_zpf': True},
+        },
+    'system':
+        {
+            'datasets': 'ds_path',
+            'phase_models': 'phases.json'
+        }
+}
 
 def test_input_yaml_valid_for_full_run():
     """A minimal full run input file should validate"""
@@ -124,6 +137,11 @@ def test_input_yaml_valid_for_generate_parameters_only():
 def test_input_yaml_valid_for_mcmc_from_tdb():
     """A minimal mcmc run from tdb input file should validate"""
     d = get_run_settings(MCMC_RUN_DICT)
+    assert d.get('generate_parameters') is None
+
+def test_input_yaml_valid_for_mcmc_with_additional_args():
+    """minimial mcmc run with additional arguments should valid"""
+    d = get_run_settings(MCMC_RUN_DICT_ADDITIONAL_ARGS)
     assert d.get('generate_parameters') is None
 
 

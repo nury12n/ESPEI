@@ -336,7 +336,8 @@ def driving_force_to_hyperplane(target_hyperplane_chempots: np.ndarray,
 def calculate_zpf_driving_forces(zpf_data: Sequence[Dict[str, Any]],
                                  parameters: ArrayLike = None,
                                  approximate_equilibrium: bool = False,
-                                 short_circuit: bool = False
+                                 short_circuit: bool = False,
+                                 normalize_zpf: bool = False,
                                  ) -> Tuple[List[List[float]], List[List[float]]]:
     """
     Calculate error due to phase equilibria data
@@ -394,7 +395,10 @@ def calculate_zpf_driving_forces(zpf_data: Sequence[Dict[str, Any]],
                 if np.isinf(driving_force) and short_circuit:
                     _log.debug('Equilibria: (%s), current phase: %s, hyperplane: %s, driving force: %s, reference: %s. Short circuiting.', eq_str, vertex.phase_name, target_hyperplane, driving_force, dataset_ref)
                     return [[np.inf]], [[np.inf]]
-                data_driving_forces.append(driving_force)
+                if normalize_zpf:
+                    data_driving_forces.append(driving_force / phase_region.potential_conds[v.T])
+                else:
+                    data_driving_forces.append(driving_force)
                 data_weights.append(weight)
                 _log.debug('Equilibria: (%s), current phase: %s, hyperplane: %s, driving force: %s, reference: %s', eq_str, vertex.phase_name, target_hyperplane, driving_force, dataset_ref)
         driving_forces.append(data_driving_forces)
@@ -405,7 +409,8 @@ def calculate_zpf_driving_forces(zpf_data: Sequence[Dict[str, Any]],
 def calculate_zpf_error(zpf_data: Sequence[Dict[str, Any]],
                         parameters: np.ndarray = None,
                         data_weight: int = 1.0,
-                        approximate_equilibrium: bool = False) -> float:
+                        approximate_equilibrium: bool = False,
+                        normalize_zpf: bool = False) -> float:
     """
     Calculate the likelihood due to phase equilibria data.
 
@@ -419,13 +424,16 @@ def calculate_zpf_error(zpf_data: Sequence[Dict[str, Any]],
     """
     if len(zpf_data) == 0:
         return 0.0
-    driving_forces, weights = calculate_zpf_driving_forces(zpf_data, parameters, approximate_equilibrium, short_circuit=True)
+    driving_forces, weights = calculate_zpf_driving_forces(zpf_data, parameters, approximate_equilibrium, short_circuit=True, normalize_zpf = normalize_zpf)
     # Driving forces and weights are 2D ragged arrays with the shape (len(zpf_data), len(zpf_data['values']))
     driving_forces = np.concatenate(driving_forces)
     weights = np.concatenate(weights)
     if np.any(np.logical_or(np.isinf(driving_forces), np.isnan(driving_forces))):
         return -np.inf
-    log_probabilites = norm.logpdf(driving_forces, loc=0, scale=1000/data_weight/weights)
+    if normalize_zpf:
+        log_probabilites = norm.logpdf(driving_forces, loc=0, scale=1/data_weight/weights)
+    else:
+        log_probabilites = norm.logpdf(driving_forces, loc=0, scale=1000/data_weight/weights)
     _log.debug('Data weight: %s, driving forces: %s, weights: %s, probabilities: %s', data_weight, driving_forces, weights, log_probabilites)
     return np.sum(log_probabilites)
 
@@ -438,6 +446,7 @@ class ZPFResidual(ResidualFunction):
         phase_models: Union[PhaseModelSpecification, None],
         symbols_to_fit: Optional[List[SymbolName]] = None,
         weight: Optional[Dict[str, float]] = None,
+        custom_args: Optional[Dict] = {},
         ):
         super().__init__(database, datasets, phase_models, symbols_to_fit, weight)
         if weight is not None:
@@ -450,6 +459,9 @@ class ZPFResidual(ResidualFunction):
         else:
             comps = sorted(database.elements)
             model_dict = dict()
+
+        self.normalize_zpf = custom_args.get('normalize', False)
+
         phases = sorted(filter_phases(database, unpack_components(database, comps), database.phases.keys()))
         if symbols_to_fit is None:
             symbols_to_fit = database_symbols_to_fit(database)
@@ -465,7 +477,7 @@ class ZPFResidual(ResidualFunction):
         return residuals, weights
 
     def get_likelihood(self, parameters) -> float:
-        likelihood = calculate_zpf_error(self.zpf_data, parameters, data_weight=self.weight)
+        likelihood = calculate_zpf_error(self.zpf_data, parameters, data_weight=self.weight, normalize_zpf=self.normalize_zpf)
         return likelihood
 
 

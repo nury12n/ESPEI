@@ -13,7 +13,7 @@ from espei.error_functions.residual_base import residual_function_registry
 _log = logging.getLogger(__name__)
 
 
-def setup_context(dbf, datasets, symbols_to_fit=None, data_weights=None, phase_models=None, make_callables=True):
+def setup_context(dbf, datasets, symbols_to_fit=None, data_weights=None, phase_models=None, make_callables=True, custom_args = {}):
     """
     Set up a context dictionary for calculating error.
 
@@ -62,7 +62,7 @@ def setup_context(dbf, datasets, symbols_to_fit=None, data_weights=None, phase_m
     for residual_func_class in residual_function_registry.get_registered_residual_functions():
         _log.trace("Getting residual object for %s", residual_func_class.__qualname__)
         t1 = time.time()
-        residual_obj = residual_func_class(dbf, datasets, phase_models, symbols_to_fit, data_weights)
+        residual_obj = residual_func_class(dbf, datasets, phase_models, symbols_to_fit, data_weights, custom_args=custom_args)
         residual_objs.append(residual_obj)
         t2 = time.time()
         _log.trace("Finished getting residual object for %s in %0.2f s", residual_func_class.__qualname__, t2-t1)

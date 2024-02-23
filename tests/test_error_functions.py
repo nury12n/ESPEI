@@ -308,6 +308,21 @@ def test_zpf_residual_function(datasets_db):
     zero_error_prob = np.sum(scipy.stats.norm(loc=0, scale=1000.0).logpdf([0.0, 0.0]))
     assert np.isclose(likelihood, zero_error_prob, rtol=1e-6)
 
+def test_zpf_residual_function_normalized(datasets_db):
+    dbf = Database(CU_MG_TDB)
+    datasets_db.insert(CU_MG_DATASET_ZPF_ZERO_ERROR)
+
+    residual_func = ZPFResidual(dbf, datasets_db, phase_models=None, symbols_to_fit=[], custom_args={'normalize': True})
+
+    # Regression test "truth" values - got values by running
+    residuals, weights = residual_func.get_residuals(np.asarray([]))
+    assert len(residuals) == len(weights)
+    assert np.allclose(residuals, [0.0, 0.0], atol=1e-3)  # looser tolerance due to numerical instabilities
+    likelihood = residual_func.get_likelihood(np.asarray([]))
+    # ZPF weight = 1 kJ/K and there are two points in the tieline
+    zero_error_prob = np.sum(scipy.stats.norm(loc=0, scale=1.0).logpdf([0.0, 0.0]))
+    assert np.isclose(likelihood, zero_error_prob, rtol=1e-6)
+
 
 def test_subsystem_zpf_probability(datasets_db):
     """Test binary Cr-Ni data produces the same probability regardless of whether the main system is a binary or ternary."""

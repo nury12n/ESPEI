@@ -184,6 +184,7 @@ class EmceeOptimizer(OptimizerBase):
              chains_per_parameter=2, chain_std_deviation=0.1, deterministic=True,
              restart_trace=None, tracefile=None, probfile=None,
              mcmc_data_weights=None, approximate_equilibrium=False,
+             custom_args = {}
              ):
         """
 
@@ -226,7 +227,7 @@ class EmceeOptimizer(OptimizerBase):
         # Set NumPy print options so logged arrays print on one line. Reset at the end.
         np.set_printoptions(linewidth=sys.maxsize)
         cbs = self.scheduler is None
-        ctx = setup_context(self.dbf, ds, symbols, data_weights=mcmc_data_weights, phase_models=self.phase_models, make_callables=cbs)
+        ctx = setup_context(self.dbf, ds, symbols, data_weights=mcmc_data_weights, phase_models=self.phase_models, make_callables=cbs, custom_args=custom_args)
         symbols_to_fit = ctx['symbols_to_fit']
         initial_guess = np.array([unpack_piecewise(self.dbf.symbols[s]) for s in symbols_to_fit])
 

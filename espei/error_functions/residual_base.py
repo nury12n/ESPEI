@@ -52,7 +52,7 @@ class ResidualFunction(Protocol):
         phase_models: PhaseModelSpecification,
         symbols_to_fit: Optional[List[SymbolName]] = None,
         weight: Optional[Dict[str, float]] = None,
-        custom_args: Optional[Dict] = {},
+        additional_mcmc_args: Optional[Dict] = {},
         ):
         ...
 

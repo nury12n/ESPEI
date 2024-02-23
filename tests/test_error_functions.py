@@ -298,6 +298,8 @@ def test_zpf_residual_function(datasets_db):
     datasets_db.insert(CU_MG_DATASET_ZPF_ZERO_ERROR)
 
     residual_func = ZPFResidual(dbf, datasets_db, phase_models=None, symbols_to_fit=[])
+    #Test that default additional_mcmc_args gives False for normalize ZPF
+    assert residual_func.normalize_zpf == False
 
     # Regression test "truth" values - got values by running
     residuals, weights = residual_func.get_residuals(np.asarray([]))
@@ -312,7 +314,9 @@ def test_zpf_residual_function_normalized(datasets_db):
     dbf = Database(CU_MG_TDB)
     datasets_db.insert(CU_MG_DATASET_ZPF_ZERO_ERROR)
 
-    residual_func = ZPFResidual(dbf, datasets_db, phase_models=None, symbols_to_fit=[], custom_args={'normalize': True})
+    residual_func = ZPFResidual(dbf, datasets_db, phase_models=None, symbols_to_fit=[], additional_mcmc_args={'normalize_zpf': True})
+    #Test that normalize ZPF is True with additional args
+    assert residual_func.normalize_zpf == True
 
     # Regression test "truth" values - got values by running
     residuals, weights = residual_func.get_residuals(np.asarray([]))

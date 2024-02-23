@@ -246,7 +246,7 @@ def run_espei(run_settings):
         data_weights = mcmc_settings.get('data_weights')
         syms = mcmc_settings.get('symbols')
         approximate_equilibrium = mcmc_settings.get('approximate_equilibrium')
-        custom_args = mcmc_settings.get('custom_args', {})
+        additional_mcmc_args = mcmc_settings.get('additional_args', {})
 
         # set up and run the EmceeOptimizer
         optimizer = EmceeOptimizer(dbf, phase_models=phase_models, scheduler=client)
@@ -258,7 +258,7 @@ def run_espei(run_settings):
                       deterministic=deterministic, restart_trace=restart_trace,
                       tracefile=tracefile, probfile=probfile,
                       mcmc_data_weights=data_weights,
-                      approximate_equilibrium=approximate_equilibrium, custom_args=custom_args
+                      approximate_equilibrium=approximate_equilibrium, additional_mcmc_args=additional_mcmc_args
                       )
 
         optimizer.dbf.to_file(output_settings['output_db'], if_exists='overwrite')

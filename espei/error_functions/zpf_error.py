@@ -446,7 +446,7 @@ class ZPFResidual(ResidualFunction):
         phase_models: Union[PhaseModelSpecification, None],
         symbols_to_fit: Optional[List[SymbolName]] = None,
         weight: Optional[Dict[str, float]] = None,
-        custom_args: Optional[Dict] = {},
+        additional_mcmc_args: Optional[Dict] = {},
         ):
         super().__init__(database, datasets, phase_models, symbols_to_fit, weight)
         if weight is not None:
@@ -460,7 +460,7 @@ class ZPFResidual(ResidualFunction):
             comps = sorted(database.elements)
             model_dict = dict()
 
-        self.normalize_zpf = custom_args.get('normalize', False)
+        self.normalize_zpf = additional_mcmc_args.get('normalize_zpf', False)
 
         phases = sorted(filter_phases(database, unpack_components(database, comps), database.phases.keys()))
         if symbols_to_fit is None:

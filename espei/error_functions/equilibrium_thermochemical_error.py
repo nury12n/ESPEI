@@ -290,7 +290,7 @@ class EquilibriumPropertyResidual(ResidualFunction):
         phase_models: Union[PhaseModelSpecification, None],
         symbols_to_fit: Optional[List[SymbolName]] = None,
         weight: Optional[Dict[str, float]] = None,
-        custom_args: Optional[Dict] = {},
+        additional_mcmc_args: Optional[Dict] = {},
         ):
         super().__init__(database, datasets, phase_models, symbols_to_fit, weight)
 

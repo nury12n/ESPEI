@@ -246,7 +246,8 @@ def run_espei(run_settings):
         data_weights = mcmc_settings.get('data_weights')
         syms = mcmc_settings.get('symbols')
         approximate_equilibrium = mcmc_settings.get('approximate_equilibrium')
-        additional_mcmc_args = mcmc_settings.get('additional_args', {})
+        additional_mcmc_args = {}
+        additional_mcmc_args['normalize_zpf'] = mcmc_settings.get('normalize_zpf', False)
 
         # set up and run the EmceeOptimizer
         optimizer = EmceeOptimizer(dbf, phase_models=phase_models, scheduler=client)

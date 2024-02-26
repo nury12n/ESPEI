@@ -324,7 +324,7 @@ def test_zpf_residual_function_normalized(datasets_db):
     assert np.allclose(residuals, [0.0, 0.0], atol=1e-3)  # looser tolerance due to numerical instabilities
     likelihood = residual_func.get_likelihood(np.asarray([]))
     # ZPF weight = 1 kJ/K and there are two points in the tieline
-    zero_error_prob = np.sum(scipy.stats.norm(loc=0, scale=1.0).logpdf([0.0, 0.0]))
+    zero_error_prob = np.sum(scipy.stats.norm(loc=0, scale=0.1).logpdf([0.0, 0.0]))
     assert np.isclose(likelihood, zero_error_prob, rtol=1e-6)
 
 

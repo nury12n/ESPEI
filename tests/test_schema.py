@@ -115,6 +115,7 @@ MCMC_RUN_DICT_ADDITIONAL_ARGS = {
             'iterations': 1000,
             'input_db': 'input.tdb',
             'normalize_zpf': True,
+            'use_futures': True,
         },
     'system':
         {
@@ -185,9 +186,11 @@ def test_correct_defaults_are_applied_from_minimal_specification():
     assert d['mcmc'].pop('chain_std_deviation') == 0.1
     assert d['mcmc'].pop('deterministic') is True
     assert d['mcmc'].pop('approximate_equilibrium') is False
-    assert d['mcmc'].pop('normalize_zpf') is False
     assert d['mcmc'].pop('data_weights') == {'ACR': 1.0, 'CPM': 1.0, 'HM': 1.0, 'SM': 1.0, 'ZPF': 1.0}
     assert d['mcmc'].pop('prior') == {'name': 'zero'}
+
+    assert d['mcmc'].pop('normalize_zpf') is False
+    assert d['mcmc'].pop('use_futures') is True
     assert len(d['mcmc']) == 1
 
 

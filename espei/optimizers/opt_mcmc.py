@@ -9,9 +9,21 @@ from espei.priors import PriorSpec, build_prior_specs, rv_zero
 from espei.utils import unpack_piecewise, optimal_parameters
 from espei.error_functions.context import setup_context
 from .opt_base import OptimizerBase
+from dask.distributed import Future, get_client, Variable
+from dask import delayed
+
+import tracemalloc
 
 _log = logging.getLogger(__name__)
 
+class _Wrapper:
+    def __init__(self, client, f, **kwargs):
+        self.client = client
+        self.f = f
+        self.kwargs = kwargs
+
+    def __call__(self, x):
+        return self.client.submit(self.f, x, **self.kwargs)
 
 class EmceeOptimizer(OptimizerBase):
     """
@@ -169,6 +181,7 @@ class EmceeOptimizer(OptimizerBase):
         _log.info('Running MCMC for %s iterations.', iterations)
         try:
             for i, result in enumerate(self.sampler.sample(chains, iterations=iterations)):
+                print(tracemalloc.get_traced_memory())
                 # progress bar
                 if (i + 1) % self.save_interval == 0:
                     self.save_sampler_state()
@@ -224,6 +237,8 @@ class EmceeOptimizer(OptimizerBase):
         Dict[str, float]
 
         """
+        tracemalloc.start()
+
         # Set NumPy print options so logged arrays print on one line. Reset at the end.
         np.set_printoptions(linewidth=sys.maxsize)
         cbs = self.scheduler is None
@@ -236,15 +251,35 @@ class EmceeOptimizer(OptimizerBase):
 
         prior_dict = self.get_priors(prior, symbols_to_fit, initial_guess)
         ctx.update(prior_dict)
+
+        use_futures = additional_mcmc_args.get('use_futures', True)
+        if self.scheduler is not None:
+            self.scheduler.use_futures = use_futures
+        if use_futures and self.scheduler is not None:
+            _log.info("Scatter context to workers")
+            ctx_futures = {key: self.scheduler.submit(lambda x: x, val, key=key) for key,val in ctx.items()}
+            #ctx_futures = {key: self.scheduler.scatter(val, broadcast=True) for key,val in ctx.items()}
+            wrapper = _Wrapper(self.scheduler, self.predict, **ctx_futures)
+
         # Run the initial parameters for guessing purposes:
         _log.trace("Probability for initial parameters")
-        self.predict(initial_guess, **ctx)
+
+        if use_futures and self.scheduler is not None:
+            wrapper(initial_guess).result()
+        else:
+            self.predict(initial_guess, **ctx)
+    
         if restart_trace is not None:
             chains = self.initialize_chains_from_trace(restart_trace)
             # TODO: check that the shape is valid with the existing parameters
         else:
             chains = self.initialize_new_chains(initial_guess, chains_per_parameter, chain_std_deviation, deterministic)
-        sampler = emcee.EnsembleSampler(chains.shape[0], initial_guess.size, self.predict, kwargs=ctx, pool=self.scheduler)
+        
+        if use_futures and self.scheduler is not None:
+            sampler = emcee.EnsembleSampler(chains.shape[0], initial_guess.size, wrapper, pool=self.scheduler)
+        else:
+            sampler = emcee.EnsembleSampler(chains.shape[0], initial_guess.size, self.predict, kwargs=ctx, pool=self.scheduler)
+        
         if deterministic:
             from espei.rstate import numpy_rstate
             sampler.random_state = numpy_rstate
@@ -262,6 +297,7 @@ class EmceeOptimizer(OptimizerBase):
         _log.trace('Change in parameters: %s', np.abs(initial_guess - optimal_params) / initial_guess)
         parameters = dict(zip(symbols_to_fit, optimal_params))
         np.set_printoptions(linewidth=75)
+        tracemalloc.stop()
         return parameters
 
     @staticmethod
@@ -290,6 +326,48 @@ class EmceeOptimizer(OptimizerBase):
         lnlike = 0.0
         likelihoods = {}
         for residual_obj in ctx.get("residual_objs", []):
+            likelihood = residual_obj.get_likelihood(params)
+            likelihoods[type(residual_obj).__name__] = likelihood
+            lnlike += likelihood
+        liketime = time.time() - starttime
+
+        like_str = ". ".join([f"{ky}: {vl:0.3f}" for ky, vl in likelihoods.items()])
+        lnlike = np.array(lnlike, dtype=np.float64)
+        _log.trace('Likelihood - %0.2fs - %s. Total: %0.3f.', liketime, like_str, lnlike)
+
+        lnprob = lnprior + lnlike
+        _log.trace('Proposal - lnprior: %0.4f, lnlike: %0.4f, lnprob: %0.4f', lnprior, lnlike, lnprob)
+        return lnprob
+    
+    @staticmethod
+    def predict_futures(params, **ctx):
+        """
+        Calculate lnprob = lnlike + lnprior
+        """
+        _log.debug('Parameters - %s', params)
+
+        # Important to coerce to floats here because the values _must_ be floats if
+        # they are used to update PhaseRecords directly
+        params = np.asarray(params, dtype=np.float_)
+
+        # lnprior
+        #prior_rvs = ctx.get('prior_rvs', [rv_zero() for _ in range(params.size)])
+        prior_rvs = ctx['prior_rvs_var'].get()
+        lnprior_multivariate = [rv.logpdf(theta) for rv, theta in zip(prior_rvs, params)]
+        _log.debug('Priors: %s', lnprior_multivariate)
+        lnprior = np.sum(lnprior_multivariate)
+        if np.isneginf(lnprior):
+            # It doesn't matter what the likelihood is. We can skip calculating it to save time.
+            _log.trace('Proposal - lnprior: %0.4f, lnlike: %0.4f, lnprob: %0.4f', lnprior, np.nan, lnprior)
+            return lnprior
+
+        # lnlike
+        starttime = time.time()
+        lnlike = 0.0
+        likelihoods = {}
+        #for residual_obj in ctx.get("residual_objs", []):
+        residuals = ctx['residual_objs_var'].get()
+        for residual_obj in residuals:
             likelihood = residual_obj.get_likelihood(params)
             likelihoods[type(residual_obj).__name__] = likelihood
             lnlike += likelihood

@@ -62,6 +62,39 @@ class PhaseRegion:
         phase_compositions = ', '.join(f'{vtx.phase_name}: {vtx.comp_conds}' for vtx in self.vertices)
         return f"conds: ({self.potential_conds}), comps: ({phase_compositions})"
 
+def _prebuild_zpf_phase_records(dbf, datasets, symbols_to_fit = None, phase_models = None):
+    _cached_comps = {}
+    db_phases = [p for p in dbf.phases]
+    for d in datasets:
+        comps = frozenset(d['components']).union({'VA'})
+        phases = frozenset(filter_phases(dbf, unpack_components(dbf, list(comps)), dbf.phases.keys()))
+        #phases = frozenset(d['phases']).intersection(frozenset(db_phases))
+        
+        if comps in _cached_comps:
+            _cached_comps[comps] = _cached_comps[comps].union(phases)
+        else:
+            _cached_comps[comps] = phases
+
+    if symbols_to_fit is None:
+        symbols_to_fit = database_symbols_to_fit(dbf)
+
+    parameters = dict(zip(symbols_to_fit, [0]*len(symbols_to_fit)))
+
+    if phase_models is None:
+        model_dict = None
+    else:
+        model_dict = phase_models.get_model_dict()
+
+    _cached_phase_records = {}
+    for c, p in _cached_comps.items():
+        comps = list(c)
+        species = sorted(unpack_components(dbf, comps), key=str)
+        phases = list(p)
+        models = instantiate_models(dbf, species, phases, model=model_dict, parameters=parameters)
+        phase_records = build_phase_records(dbf, species, phases, {v.N, v.P, v.T}, models, parameters=parameters, build_gradients=True, build_hessians=True)
+        _cached_phase_records[c] = phase_records
+
+    return _cached_phase_records
 
 def _extract_pot_conds(all_conditions: Dict[v.StateVariable, np.ndarray], idx: int) -> Dict[v.StateVariable, float]:
     """Conditions are either scalar or 1d arrays for the conditions in the entire dataset.
@@ -137,7 +170,7 @@ def _subsample_phase_points(phase_record, phase_points, target_composition, addi
     return phase_points[idxs]
 
 
-def get_zpf_data(dbf: Database, comps: Sequence[str], phases: Sequence[str], datasets: PickleableTinyDB, parameters: Dict[str, float], model: Optional[Dict[str, Type[Model]]] = None):
+def get_zpf_data(dbf: Database, comps: Sequence[str], phases: Sequence[str], datasets: PickleableTinyDB, parameters: Dict[str, float], model: Optional[Dict[str, Type[Model]]] = None, cached_ph = None):
     """
     Return the ZPF data used in the calculation of ZPF error
 
@@ -170,7 +203,10 @@ def get_zpf_data(dbf: Database, comps: Sequence[str], phases: Sequence[str], dat
         data_phases = filter_phases(dbf, species, candidate_phases=phases)
         models = instantiate_models(dbf, species, data_phases, model=model, parameters=parameters)
         # assumed N, P, T state variables
-        phase_recs = build_phase_records(dbf, species, data_phases, {v.N, v.P, v.T}, models, parameters=parameters, build_gradients=True, build_hessians=True)
+        if cached_ph is None:
+            phase_recs = build_phase_records(dbf, species, data_phases, {v.N, v.P, v.T}, models, parameters=parameters, build_gradients=True, build_hessians=True)
+        else:
+            phase_recs = {p: cached_ph[frozenset(data_comps)][p] for p in data_phases}
         all_phase_points = {phase_name: _sample_phase_constitution(models[phase_name], point_sample, True, 50) for phase_name in data_phases}
         all_regions = data['values']
         conditions = data['conditions']
@@ -462,13 +498,14 @@ class ZPFResidual(ResidualFunction):
             model_dict = dict()
 
         self.normalize_zpf = additional_mcmc_args.get('normalize_zpf', False)
+        _cached_ph = additional_mcmc_args.get('cached_ph', None)
 
         phases = sorted(filter_phases(database, unpack_components(database, comps), database.phases.keys()))
         if symbols_to_fit is None:
             symbols_to_fit = database_symbols_to_fit(database)
         # okay if parameters are initialized to zero, we only need the symbol names
         parameters = dict(zip(symbols_to_fit, [0]*len(symbols_to_fit)))
-        self.zpf_data = get_zpf_data(database, comps, phases, datasets, parameters, model_dict)
+        self.zpf_data = get_zpf_data(database, comps, phases, datasets, parameters, model_dict, cached_ph=_cached_ph)
 
     def get_residuals(self, parameters: ArrayLike) -> Tuple[List[float], List[float]]:
         driving_forces, weights = calculate_zpf_driving_forces(self.zpf_data, parameters, short_circuit=True)

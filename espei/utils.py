@@ -442,6 +442,16 @@ def get_model_dict(phase_models: dict) -> Dict[str, Type[Model]]:
             model_dict[phase_name] = import_qualified_object(qualified_model_class)
     return model_dict
 
+def _not_subsystem(comps, elements):
+    """
+    Tests if comps is a subsystem of elements
+
+    Returns True if not a subsystem
+    """
+    eset = frozenset(elements)
+    pset = frozenset(comps)
+    return len(pset - eset) != 0
+
 
 class ModelTestException(Exception):
     ...

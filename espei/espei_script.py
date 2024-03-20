@@ -27,7 +27,7 @@ from pycalphad import Database
 import espei
 from espei.validation import schema
 from espei import generate_parameters
-from espei.utils import ImmediateClient, database_symbols_to_fit, import_qualified_object
+from espei.utils import ImmediateClient, database_symbols_to_fit, import_qualified_object, _not_subsystem
 from espei.datasets import DatasetError, load_datasets, recursive_glob, apply_tags
 from espei.optimizers.opt_mcmc import EmceeOptimizer
 
@@ -86,33 +86,33 @@ def _raise_dask_work_stealing():
                          "As of ESPEI v0.7.9, 'work-stealing' should be disabled automatically. "
                          "If you are seeing this error, please contact a developer.")
     
-def _not_subsystem(constituent_array, elements):
+def _reduce_datasets(ds, elements):
     """
-    Tests if constituent_array is a subsystem of elements
-
-    Returns True if not a subsystem
-    """
-    eset = frozenset(elements)
-    pset = frozenset([s.name for c in constituent_array for s in c])
-    return len(pset - eset) != 0
-
-def _reduce_database(dbf, elements):
-    """
-    Removes all irrevelent parameters so that the database used
-    in the context is smaller. This is useful for the very large databases
-    where we're only fitting a small subset of the systems
+    Removes datasets not pertaining to system
 
     Parameters
     ----------
-    dbf : Database
-        pycalphad Database object
+    ds : TinyDB
+        Datasets
     elements : list[str]
-        List of elements that we're fitting to
+        Elements from phase models
     """
     element_lambda = lambda x, elements=elements : _not_subsystem(x, elements=elements)
+    query = (where('components').test(element_lambda))
+    ds.remove(query)
+
+def _reduce_database(dbf, elements):
+    """
+    Reduces database and removes all parameters not pertaining to system
+
+    Parameters
+    ----------
+    dbf : Database object
+    elements : list[str]
+    """
+    element_lambda = lambda x, elements=elements : _not_subsystem([s.name for c in x for s in c], elements=elements)
     query = (where('constituent_array').test(element_lambda))
     dbf._parameters.remove(query)
-
 
 def get_run_settings(input_dict):
     """
@@ -195,6 +195,8 @@ def run_espei(run_settings):
 
     with open(system_settings['phase_models']) as fp:
         phase_models = json.load(fp)
+
+    _reduce_datasets(datasets, phase_models['components'])
 
     if generate_parameters_settings is not None:
         refdata = generate_parameters_settings['ref_state']

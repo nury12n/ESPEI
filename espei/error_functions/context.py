@@ -7,12 +7,34 @@ import time
 import symengine
 
 from espei.phase_models import PhaseModelSpecification
-from espei.utils import database_symbols_to_fit
+from espei.utils import database_symbols_to_fit, _not_subsystem
 from espei.error_functions.residual_base import residual_function_registry
 
 from espei.error_functions.zpf_error import _prebuild_zpf_phase_records
 
+from tinydb import where
+
 _log = logging.getLogger(__name__)
+
+def _reduce_database(dbf, elements=None):
+    """
+    Reduces database and removes all parameters not pertaining to system
+
+    Parameters
+    ----------
+    dbf : Database object
+    elements : list[str]
+    """
+    if elements is None:
+        return
+    element_lambda = lambda x, elements=elements : _not_subsystem([s.name for c in x for s in c], elements=elements)
+    query = (where('constituent_array').test(element_lambda))
+    dbf._parameters.remove(query)
+
+    symbols = frozenset()
+    for p in dbf._parameters:
+        symbols = symbols.union({str(fs) for fs in list(p['parameter'].free_symbols)})
+    dbf.symbols = {key:value for key,value in dbf.symbols.items() if key in symbols}
 
 
 def setup_context(dbf, datasets, symbols_to_fit=None, data_weights=None, phase_models=None, make_callables=True, additional_mcmc_args = {}):
@@ -47,6 +69,15 @@ def setup_context(dbf, datasets, symbols_to_fit=None, data_weights=None, phase_m
 
     # Copy the database because we replace Piecewise symbols and want to preserve the original database
     dbf = copy.deepcopy(dbf)
+    num_params = len(dbf._parameters)
+    if phase_models is None:
+        reduced_comps = None
+    else:
+        reduced_comps = phase_models.components
+    _reduce_database(dbf, reduced_comps)
+    num_params_reduced = len(dbf._parameters)
+    _log.info('Reduced database from {} to {} parameters'.format(num_params, num_params_reduced))
+    
     if symbols_to_fit is None:
         symbols_to_fit = database_symbols_to_fit(dbf)
     else:

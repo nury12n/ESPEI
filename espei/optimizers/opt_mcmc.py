@@ -12,6 +12,8 @@ from .opt_base import OptimizerBase
 from dask.distributed import Future, get_client, Variable
 from dask import delayed
 
+import time
+
 import tracemalloc
 
 _log = logging.getLogger(__name__)
@@ -294,7 +296,10 @@ class EmceeOptimizer(OptimizerBase):
         self.tracefile = tracefile
         self.probfile = probfile
         # Run the MCMC simulation
+        t0 = time.time()
         self.do_sampling(chains, iterations)
+        tf = time.time()
+        _log.info('Fit time: {}'.format(tf-t0))
 
         # Post process
         optimal_params = optimal_parameters(sampler.chain, sampler.lnprobability)

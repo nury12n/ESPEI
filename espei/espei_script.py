@@ -101,19 +101,6 @@ def _reduce_datasets(ds, elements):
     query = (where('components').test(element_lambda))
     ds.remove(query)
 
-def _reduce_database(dbf, elements):
-    """
-    Reduces database and removes all parameters not pertaining to system
-
-    Parameters
-    ----------
-    dbf : Database object
-    elements : list[str]
-    """
-    element_lambda = lambda x, elements=elements : _not_subsystem([s.name for c in x for s in c], elements=elements)
-    query = (where('constituent_array').test(element_lambda))
-    dbf._parameters.remove(query)
-
 def get_run_settings(input_dict):
     """
     Validate settings from a dict of possible input.
@@ -258,10 +245,6 @@ def run_espei(run_settings):
         # get a Database
         if mcmc_settings.get('input_db'):
             dbf = Database(mcmc_settings.get('input_db'))
-            num_params = len(dbf._parameters)
-            _reduce_database(dbf, phase_models['components'])
-            num_params_reduced = len(dbf._parameters)
-            _log.info('Reduced database from {} to {} parameters'.format(num_params, num_params_reduced))
 
         # load the restart trace if needed
         if mcmc_settings.get('restart_trace'):

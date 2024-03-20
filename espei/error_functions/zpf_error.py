@@ -480,6 +480,10 @@ class ZPFResidual(ResidualFunction):
     def get_likelihood(self, parameters) -> float:
         likelihood = calculate_zpf_error(self.zpf_data, parameters, data_weight=self.weight, normalize_zpf=self.normalize_zpf)
         return likelihood
+    
+    def __getstate__(self):
+        _log.info('Picking ZPF redidual')
+        return self.__dict__
 
 
 residual_function_registry.register(ZPFResidual)

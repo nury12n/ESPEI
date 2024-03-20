@@ -85,6 +85,33 @@ def _raise_dask_work_stealing():
                          "This parameter causes some instability for long-running processes. "
                          "As of ESPEI v0.7.9, 'work-stealing' should be disabled automatically. "
                          "If you are seeing this error, please contact a developer.")
+    
+def _not_subsystem(constituent_array, elements):
+    """
+    Tests if constituent_array is a subsystem of elements
+
+    Returns True if not a subsystem
+    """
+    eset = frozenset(elements)
+    pset = frozenset([s.name for c in constituent_array for s in c])
+    return len(pset - eset) != 0
+
+def _reduce_database(dbf, elements):
+    """
+    Removes all irrevelent parameters so that the database used
+    in the context is smaller. This is useful for the very large databases
+    where we're only fitting a small subset of the systems
+
+    Parameters
+    ----------
+    dbf : Database
+        pycalphad Database object
+    elements : list[str]
+        List of elements that we're fitting to
+    """
+    element_lambda = lambda x, elements=elements : _not_subsystem(x, elements=elements)
+    query = (where('constituent_array').test(element_lambda))
+    dbf._parameters.remove(query)
 
 
 def get_run_settings(input_dict):
@@ -229,6 +256,10 @@ def run_espei(run_settings):
         # get a Database
         if mcmc_settings.get('input_db'):
             dbf = Database(mcmc_settings.get('input_db'))
+            num_params = len(dbf._parameters)
+            _reduce_database(dbf, phase_models['components'])
+            num_params_reduced = len(dbf._parameters)
+            _log.info('Reduced database from {} to {} parameters'.format(num_params, num_params_reduced))
 
         # load the restart trace if needed
         if mcmc_settings.get('restart_trace'):

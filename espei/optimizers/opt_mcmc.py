@@ -263,7 +263,8 @@ class EmceeOptimizer(OptimizerBase):
         if use_futures and self.scheduler is not None:
             _log.info("Scatter context to workers")
             ctx_futures = {key: self.scheduler.submit(lambda x: x, val, key=key) for key,val in ctx.items()}
-            #ctx_futures = {key: self.scheduler.scatter(val, broadcast=True) for key,val in ctx.items()}
+            #large_ctx_futures = {key: self.scheduler.scatter(val, broadcast=True) for key,val in ctx.items()}
+            #ctx_futures = {key: self.scheduler.submit(lambda x: x, val, key=key) for key,val in large_ctx_futures.items()}
             wrapper = _Wrapper(self.scheduler, self.predict, **ctx_futures)
 
         # Run the initial parameters for guessing purposes:

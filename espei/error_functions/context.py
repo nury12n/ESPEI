@@ -10,8 +10,6 @@ from espei.phase_models import PhaseModelSpecification
 from espei.utils import database_symbols_to_fit, _not_subsystem
 from espei.error_functions.residual_base import residual_function_registry
 
-from espei.error_functions.zpf_error import _prebuild_zpf_phase_records
-
 from tinydb import where
 
 _log = logging.getLogger(__name__)
@@ -90,8 +88,6 @@ def setup_context(dbf, datasets, symbols_to_fit=None, data_weights=None, phase_m
         if isinstance(dbf.symbols[x], symengine.Piecewise):
             _log.debug("Replacing %s in database", x)
             dbf.symbols[x] = dbf.symbols[x].args[0]
-
-    additional_mcmc_args['cached_ph'] = _prebuild_zpf_phase_records(dbf, datasets, symbols_to_fit, phase_models)
 
     residual_objs = []
     for residual_func_class in residual_function_registry.get_registered_residual_functions():

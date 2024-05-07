@@ -27,7 +27,7 @@ from pycalphad import Database
 import espei
 from espei.validation import schema
 from espei import generate_parameters
-from espei.utils import ImmediateClient, database_symbols_to_fit, import_qualified_object, _not_subsystem
+from espei.utils import ImmediateClient, database_symbols_to_fit, import_qualified_object
 from espei.datasets import DatasetError, load_datasets, recursive_glob, apply_tags
 from espei.optimizers.opt_mcmc import EmceeOptimizer
 
@@ -86,20 +86,6 @@ def _raise_dask_work_stealing():
                          "As of ESPEI v0.7.9, 'work-stealing' should be disabled automatically. "
                          "If you are seeing this error, please contact a developer.")
     
-def _reduce_datasets(ds, elements):
-    """
-    Removes datasets not pertaining to system
-
-    Parameters
-    ----------
-    ds : TinyDB
-        Datasets
-    elements : list[str]
-        Elements from phase models
-    """
-    element_lambda = lambda x, elements=elements : _not_subsystem(x, elements=elements)
-    query = (where('components').test(element_lambda))
-    ds.remove(query)
 
 def get_run_settings(input_dict):
     """
@@ -182,8 +168,6 @@ def run_espei(run_settings):
 
     with open(system_settings['phase_models']) as fp:
         phase_models = json.load(fp)
-
-    _reduce_datasets(datasets, phase_models['components'])
 
     if generate_parameters_settings is not None:
         refdata = generate_parameters_settings['ref_state']

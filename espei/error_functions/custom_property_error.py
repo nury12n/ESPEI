@@ -25,7 +25,7 @@ from espei.utils import PickleableTinyDB, database_symbols_to_fit
 _log = logging.getLogger(__name__)
 
 
-EqPropData = NamedTuple('EqPropData', (('dbf', Database),
+PropData = NamedTuple('EqPropData', (('dbf', Database),
                                        ('species', Sequence[v.Species]),
                                        ('phases', Sequence[str]),
                                        ('potential_conds', Dict[v.StateVariable, float]),
@@ -37,15 +37,17 @@ EqPropData = NamedTuple('EqPropData', (('dbf', Database),
                                        ('samples', np.ndarray),
                                        ('weight', np.ndarray),
                                        ('reference', str),
+                                       ('property_kwargs', {})
                                        ))
 
 
-def build_eqpropdata(data: tinydb.database.Document,
+def build_propdata(data: tinydb.database.Document,
                      dbf: Database,
                      model: Optional[Dict[str, Type[Model]]] = None,
                      parameters: Optional[Dict[str, float]] = None,
-                     data_weight_dict: Optional[Dict[str, float]] = None
-                     ) -> EqPropData:
+                     data_weight_dict: Optional[Dict[str, float]] = None,
+                     property_std: float = 1,
+                     ) -> PropData:
     """
     Build EqPropData for the calculations corresponding to a single dataset.
 
@@ -68,11 +70,6 @@ def build_eqpropdata(data: tinydb.database.Document,
     """
     parameters = parameters if parameters is not None else {}
     data_weight_dict = data_weight_dict if data_weight_dict is not None else {}
-    property_std_deviation = {
-        'HM': 500.0,  # J/mol
-        'SM':   0.2,  # J/K-mol
-        'CPM':  0.2,  # J/K-mol
-    }
 
     params_keys, _ = extract_parameters(parameters)
 
@@ -81,19 +78,8 @@ def build_eqpropdata(data: tinydb.database.Document,
     data_phases = filter_phases(dbf, species, candidate_phases=data['phases'])
     models = instantiate_models(dbf, species, data_phases, model=model, parameters=parameters)
     output = data['output']
-    property_output = output.split('_')[0]  # property without _FORM, _MIX, etc.
     samples = np.array(data['values']).flatten()
     reference = data.get('reference', '')
-
-    # Models are now modified in response to the data from this data
-    # TODO: build a reference state MetaProperty with the reference state information, maybe just-in-time, below
-    if 'reference_states' in data:
-        property_output = output[:-1] if output.endswith('R') else output  # unreferenced model property so we can tell shift_reference_state what to build.
-        reference_states = []
-        for el, vals in data['reference_states'].items():
-            reference_states.append(ReferenceState(v.Species(el), vals['phase'], fixed_statevars=vals.get('fixed_state_variables')))
-        for mod in models.values():
-            mod.shift_reference_state(reference_states, dbf, output=(property_output,))
 
     data['conditions'].setdefault('N', 1.0)  # Add default for N. Nothing else is supported in pycalphad anyway.
     pot_conds = OrderedDict([(getattr(v, key), unpack_condition(data['conditions'][key])) for key in sorted(data['conditions'].keys()) if not key.startswith('X_')])
@@ -112,18 +98,23 @@ def build_eqpropdata(data: tinydb.database.Document,
     # Build weights, should be the same size as the values
     total_num_calculations = len(rav_comp_conds)*np.prod([len(vals) for vals in pot_conds.values()])
     dataset_weights = np.array(data.get('weight', 1.0)) * np.ones(total_num_calculations)
-    weights = (property_std_deviation.get(property_output, 1.0)/data_weight_dict.get(property_output, 1.0)/dataset_weights).flatten()
+    weights = (property_std/data_weight_dict.get(output, 1.0)/dataset_weights).flatten()
 
-    return EqPropData(dbf, species, data_phases, pot_conds, rav_comp_conds, models, params_keys, phase_record_factory, output, samples, weights, reference)
+    property_kwargs = data.get('property_kwargs', {})
+
+    return PropData(dbf, species, data_phases, pot_conds, 
+                      rav_comp_conds, models, params_keys, phase_record_factory, 
+                      output, samples, weights, reference, property_kwargs)
 
 
-def get_equilibrium_thermochemical_data(dbf: Database, comps: Sequence[str],
+def get_custom_property_data(dbf: Database, comps: Sequence[str],
                                         phases: Sequence[str],
                                         datasets: PickleableTinyDB,
                                         model: Optional[Dict[str, Model]] = None,
                                         parameters: Optional[Dict[str, float]] = None,
                                         data_weight_dict: Optional[Dict[str, float]] = None,
-                                        ) -> Sequence[EqPropData]:
+                                        property_std: float = 1,
+                                        ) -> Sequence[PropData]:
     """
     Get all the EqPropData for each matching equilibrium thermochemical dataset in the datasets
 
@@ -161,20 +152,19 @@ def get_equilibrium_thermochemical_data(dbf: Database, comps: Sequence[str],
         (where('output') != 'ZPF') & (~where('solver').exists()) &
         (where('output').test(lambda x: 'ACR' not in x)) &  # activity data not supported yet
         (where('output').test(lambda x: 'DIFF' not in x)) & (where('output').test(lambda x: 'TRACER' not in x)) & # ignore diffusivity
-        (where('output').test(lambda x: x not in residual_function_registry._custom_outputs)) & # filter out custom outputs
         (where('components').test(lambda x: set(x).issubset(comps))) &
         (where('phases').test(lambda x: set(x).issubset(set(phases))))
     )
 
     eq_thermochemical_data = []  # 1:1 correspondence with each dataset
     for data in desired_data:
-        eq_thermochemical_data.append(build_eqpropdata(data, dbf, model=model, parameters=parameters, data_weight_dict=data_weight_dict))
+        eq_thermochemical_data.append(build_propdata(data, dbf, model=model, parameters=parameters, data_weight_dict=data_weight_dict, property_std=property_std))
     return eq_thermochemical_data
 
 
-def calc_prop_differences(eqpropdata: EqPropData,
+def calc_prop_differences(propdata: PropData,
                           parameters: np.ndarray,
-                          approximate_equilibrium: Optional[bool] = False,
+                          computable_property,
                           ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Calculate differences between the expected and calculated values for a property
@@ -198,27 +188,28 @@ def calc_prop_differences(eqpropdata: EqPropData,
         * weights for this dataset
 
     """
-    dbf = eqpropdata.dbf
-    species = eqpropdata.species
-    phases = eqpropdata.phases
-    pot_conds = eqpropdata.potential_conds
-    models = eqpropdata.models
-    phase_record_factory = eqpropdata.phase_record_factory
+    dbf = propdata.dbf
+    species = propdata.species
+    phases = propdata.phases
+    pot_conds = propdata.potential_conds
+    models = propdata.models
+    phase_record_factory = propdata.phase_record_factory
     update_phase_record_parameters(phase_record_factory, parameters)
-    params_dict = OrderedDict(zip(map(str, eqpropdata.params_keys), parameters))
-    output = as_property(eqpropdata.output)
-    weights = np.array(eqpropdata.weight, dtype=np.float64)
-    samples = np.array(eqpropdata.samples, dtype=np.float64)
+    params_dict = OrderedDict(zip(map(str, propdata.params_keys), parameters))
+    output = as_property(propdata.output)
+    weights = np.array(propdata.weight, dtype=np.float64)
+    samples = np.array(propdata.samples, dtype=np.float64)
     wks = Workspace(database=dbf, components=species, phases=phases, models=models, phase_record_factory=phase_record_factory, parameters=params_dict)
 
     calculated_data = []
-    for comp_conds in eqpropdata.composition_conds:
+    for comp_conds in propdata.composition_conds:
         cond_dict = OrderedDict(**pot_conds, **comp_conds)
         wks.conditions = cond_dict
         wks.parameters = params_dict  # these reset models and phase_record_factory through depends_on -> lose Model.shift_reference_state, etc.
         wks.models = models
         wks.phase_record_factory = phase_record_factory
-        vals = wks.get(output)
+        prop = computable_property(wks, **propdata.property_kwargs)
+        vals = wks.get(prop)
         calculated_data.extend(np.atleast_1d(vals).tolist())
 
     calculated_data = np.array(calculated_data, dtype=np.float64)
@@ -226,14 +217,14 @@ def calc_prop_differences(eqpropdata: EqPropData,
     assert calculated_data.shape == samples.shape, f"Calculated data shape {calculated_data.shape} does not match samples shape {samples.shape}"
     assert calculated_data.shape == weights.shape, f"Calculated data shape {calculated_data.shape} does not match weights shape {weights.shape}"
     differences = calculated_data - samples
-    _log.debug('Output: %s differences: %s, weights: %s, reference: %s', output, differences, weights, eqpropdata.reference)
+    _log.debug('Output: %s differences: %s, weights: %s, reference: %s', output, differences, weights, propdata.reference)
     return differences, weights
 
 
-def calculate_equilibrium_thermochemical_probability(eq_thermochemical_data: Sequence[EqPropData],
-                                                     parameters: np.ndarray,
-                                                     approximate_equilibrium: Optional[bool] = False,
-                                                     ) -> float:
+def calculate_custom_property_probability(prop_data: Sequence[PropData],
+                                          parameters: np.ndarray,
+                                          computable_property,
+                                          ) -> float:
     """
     Calculate the total equilibrium thermochemical probability for all EqPropData
 
@@ -253,13 +244,13 @@ def calculate_equilibrium_thermochemical_probability(eq_thermochemical_data: Seq
         Sum of log-probability for all thermochemical data.
 
     """
-    if len(eq_thermochemical_data) == 0:
+    if len(prop_data) == 0:
         return 0.0
 
     differences = []
     weights = []
-    for eqpropdata in eq_thermochemical_data:
-        diffs, wts = calc_prop_differences(eqpropdata, parameters, approximate_equilibrium)
+    for propdata in prop_data:
+        diffs, wts = calc_prop_differences(propdata, parameters, computable_property)
         if np.any(np.isinf(diffs) | np.isnan(diffs)):
             # NaN or infinity are assumed calculation failures. If we are
             # calculating log-probability, just bail out and return -infinity.
@@ -273,7 +264,11 @@ def calculate_equilibrium_thermochemical_probability(eq_thermochemical_data: Seq
     return np.sum(probs)
 
 
-class EquilibriumPropertyResidual(ResidualFunction):
+class CustomPropertyResidual(ResidualFunction):
+    prop = None
+    name = 'None'
+    property_std = 1
+
     def __init__(
         self,
         database: Database,
@@ -300,20 +295,17 @@ class EquilibriumPropertyResidual(ResidualFunction):
             symbols_to_fit = database_symbols_to_fit(database)
         # okay if parameters are initialized to zero, we only need the symbol names
         parameters = dict(zip(symbols_to_fit, [0]*len(symbols_to_fit)))
-        self.property_data = get_equilibrium_thermochemical_data(database, comps, phases, datasets, model_dict, parameters, data_weight_dict=self.weight)
+        self.property_data = get_custom_property_data(database, comps, phases, datasets, model_dict, parameters, data_weight_dict=self.weight, property_std=self.property_std)
 
     def get_residuals(self, parameters: npt.ArrayLike) -> Tuple[List[float], List[float]]:
         residuals = []
         weights = []
         for data in self.property_data:
-            dataset_residuals, dataset_weights = calc_prop_differences(data, parameters)
+            dataset_residuals, dataset_weights = calc_prop_differences(data, parameters, self.prop)
             residuals.extend(dataset_residuals.tolist())
             weights.extend(dataset_weights.tolist())
         return residuals, weights
 
     def get_likelihood(self, parameters) -> float:
-        likelihood = calculate_equilibrium_thermochemical_probability(self.property_data, parameters)
+        likelihood = calculate_custom_property_probability(self.property_data, parameters, self.prop)
         return likelihood
-
-
-residual_function_registry.register(EquilibriumPropertyResidual)

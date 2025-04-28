@@ -99,6 +99,8 @@ class ResidualFunction(Protocol):
 class ResidualRegistry():
     def __init__(self) -> None:
         self._registered_residual_functions: Type[ResidualFunction] = []
+        # Custom outputs to filter out in thermochemical error
+        self._custom_outputs = []
 
     def get_registered_residual_functions(self) -> List[Type[ResidualFunction]]:
         return self._registered_residual_functions
@@ -107,5 +109,9 @@ class ResidualRegistry():
         # Don't allow duplicates
         if residual_function not in self._registered_residual_functions:
             self._registered_residual_functions.append(residual_function)
+
+    def register_output(self, output: str):
+        if output not in self._custom_outputs:
+            self._custom_outputs.append(output)
 
 residual_function_registry = ResidualRegistry()

@@ -72,6 +72,8 @@ def _extract_pot_conds(all_conditions: Dict[v.StateVariable, np.ndarray], idx: i
         # Otherwise treat it as a scalar
         if len(cond_val) > 1:
             cond_val = cond_val[idx]
+        else:
+            cond_val = cond_val[0]
         pot_conds[getattr(v, cond_key)] = float(cond_val)
     return pot_conds
 
@@ -144,7 +146,7 @@ def get_zpf_data(dbf: Database, comps: Sequence[str], phases: Sequence[str], dat
     wks = Workspace(dbf, comps, phases)
     if model is None:
         model = {}
-        
+
     params_keys = []
     for key in parameters.keys():
         if not hasattr(v, key):
@@ -243,7 +245,7 @@ def estimate_hyperplane(phase_region: PhaseRegion, dbf: Database, parameter_dict
             # TODO: active_pure_elements should be replaced with wks.components when wks.components no longer includes phase constituent Species
             active_pure_elements = [list(x.constituents.keys()) for x in species]
             active_pure_elements = sorted(set(el.upper() for constituents in active_pure_elements for el in constituents) - {"VA"})
-            MU_values = [wks.get(v.MU(comp)) for comp in active_pure_elements] 
+            MU_values = [wks.get(v.MU(comp)) for comp in active_pure_elements]
             gradient_params = [JanssonDerivative(v.MU(spc), key) for spc in active_pure_elements for key in parameter_dict]
             gradients = wks.get(*gradient_params)
             if type(gradients) is list:
@@ -268,7 +270,7 @@ def estimate_hyperplane(phase_region: PhaseRegion, dbf: Database, parameter_dict
                 target_hyperplane_chempots.append(MU_values)
                 target_hyperplane_chempots_grads.append(gradients_magnitude)
     target_hyperplane_mean_chempots = np.nanmean(target_hyperplane_chempots, axis=0, dtype=np.float64)
-    target_hyperplane_chempots_grads = np.nanmean(target_hyperplane_chempots_grads, axis=0, dtype=np.float64) 
+    target_hyperplane_chempots_grads = np.nanmean(target_hyperplane_chempots_grads, axis=0, dtype=np.float64)
     return target_hyperplane_mean_chempots, target_hyperplane_chempots_grads
 
 
@@ -294,7 +296,7 @@ def driving_force_to_hyperplane(target_hyperplane_chempots: np.ndarray, target_h
         # stoichiometric and the user did not specify a valid phase composition.
         single_eqdata = calculate_(species, [current_phase], str_statevar_dict, models, phase_record_factory, pdens=50) ## SOMETHING WEIRD HAPPENS WHEN PDENS IS TOO HIGH!
         df = np.multiply(target_hyperplane_chempots, single_eqdata.X).sum(axis=-1) - single_eqdata.GM
-        
+
         if np.squeeze(single_eqdata.X).ndim == 1:
             vertex_comp_estimate = np.squeeze(single_eqdata.X)
         elif (np.isnan(df).all()):
@@ -303,10 +305,13 @@ def driving_force_to_hyperplane(target_hyperplane_chempots: np.ndarray, target_h
             return driving_force, driving_force_gradient
         else:
             vertex_comp_estimate = np.squeeze(single_eqdata.X)[np.nanargmax(df),:]
-            
+
         counter = 0
+        sub_space = False
         for comp in species:
             if v.Species(comp) != v.Species('VA'):
+                if vertex_comp_estimate[counter] < 5e-6:
+                    sub_space = True
                 if v.X(comp) in cond_dict.keys():
                     if vertex_comp_estimate[counter] < 5e-6:
                         vertex_comp_estimate[counter] = 5e-6
@@ -314,9 +319,22 @@ def driving_force_to_hyperplane(target_hyperplane_chempots: np.ndarray, target_h
                         vertex_comp_estimate[counter] = 1 - 5e-6
                     cond_dict.update({v.X(comp): vertex_comp_estimate[counter]})
                 counter = counter + 1
-                
+
         # local_conds = dict(zip(single_eqdata.components, single_eqdata.X))
-            
+        if sub_space:
+            driving_force = 0
+            driving_force_gradient = np.squeeze(np.matmul(vertex_comp_estimate,target_hyperplane_chempots_grads))
+        else:
+            wks = Workspace(database=dbf, components=species, phases=current_phase,  phase_record_factory=phase_record_factory, conditions=cond_dict)
+            constrained_energy = wks.get(IsolatedPhase(current_phase,wks=wks)('GM'))
+            driving_force = np.dot(np.squeeze(target_hyperplane_chempots), vertex_comp_estimate) - constrained_energy
+            ip = IsolatedPhase(current_phase, wks=wks)
+            constrained_energy_gradient = []
+            for key in parameter_dict:
+                constrained_energy_gradient.append(wks.get(ip('GM.'+key)))
+
+            driving_force_gradient = np.squeeze(np.matmul(vertex_comp_estimate,target_hyperplane_chempots_grads) - constrained_energy_gradient)
+
         wks = Workspace(database=dbf, components=species, phases=current_phase,  phase_record_factory=phase_record_factory, conditions=cond_dict)
         constrained_energy = wks.get(IsolatedPhase(current_phase,wks=wks)('GM'))
         driving_force = np.dot(np.squeeze(target_hyperplane_chempots), vertex_comp_estimate) - constrained_energy
@@ -324,9 +342,9 @@ def driving_force_to_hyperplane(target_hyperplane_chempots: np.ndarray, target_h
         constrained_energy_gradient = []
         for key in parameter_dict:
             constrained_energy_gradient.append(wks.get(ip('GM.'+key)))
-        
+
         driving_force_gradient = np.squeeze(np.matmul(vertex_comp_estimate,target_hyperplane_chempots_grads) - constrained_energy_gradient)
-        
+
     elif vertex.is_disordered:
         # Construct disordered sublattice configuration from composition dict
         # Compute energy
@@ -466,7 +484,7 @@ def calculate_zpf_error(zpf_data: Sequence[Dict[str, Any]],
             return -np.inf, -np.inf
         else:
             return -np.inf, np.ones(len(parameters))*(-np.inf)
-        
+
     log_probabilites = norm.logpdf(driving_forces, loc=0, scale=1000/data_weight/weights)
     grad_log_probs = -driving_forces*gradients.T/(1000/data_weight/weights)**2
 
